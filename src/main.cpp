@@ -33,12 +33,10 @@ int main(void)
 
     /* Part 17: two simple tasks, both must block between executions
      * (Part 19: no uncontrolled busy loops). */
-    xTaskCreate(TaskA, "TaskA", configMINIMAL_STACK_SIZE, nullptr,
-                tskIDLE_PRIORITY + 1, &taskA_handle);
-    xTaskCreate(TaskB, "TaskB", configMINIMAL_STACK_SIZE, nullptr,
-                tskIDLE_PRIORITY + 1, &taskB_handle);
-
-    vTaskStartScheduler();
+   BaseType_t resultA = xTaskCreate(TaskA, "TaskA", configMINIMAL_STACK_SIZE, nullptr, tskIDLE_PRIORITY + 1, &taskA_handle); UART_Print(resultA == pdPASS ? "TaskA created OK\r\n" : "TaskA create FAILED\r\n"); 
+   BaseType_t resultB = xTaskCreate(TaskB, "TaskB", configMINIMAL_STACK_SIZE, nullptr, tskIDLE_PRIORITY + 1, &taskB_handle); UART_Print(resultB == pdPASS ? "TaskB created OK\r\n" : "TaskB create FAILED\r\n");
+   UART_Print("Starting scheduler...\r\n");
+   vTaskStartScheduler();
 
     /* Should never reach here — if it does, heap allocation for the
      * idle/timer task failed. */
