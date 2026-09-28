@@ -1,6 +1,6 @@
 # FreeRTOS-Based STM32 Multisensor Room Monitoring System
 
-![Finished System](docs/images/finish-system.png.png)
+![Finished System](docs/images/finish-system.png)
 
 *Figure 1. Finished Wokwi simulation of the STM32 multisensor room monitoring system.*
 
@@ -66,7 +66,7 @@ The PIR sensor is monitored by `MotionTask`. Motion information is communicated 
 
 The rotary encoder is handled by `InputTask`, while `DisplayTask` controls the OLED.
 
-![System Architecture](docs/images/system-architecture.png.png)
+![System Architecture](docs/images/system-architecture.png)
 
 *Figure 2. Overall system architecture of the STM32 multisensor room monitoring system.*
 
@@ -76,7 +76,7 @@ The rotary encoder is handled by `InputTask`, while `DisplayTask` controls the O
 
 The system uses multiple FreeRTOS tasks, queues, an event group, and a mutex to organize the application.
 
-![FreeRTOS Architecture](docs/images/freertos-architecture.png.png)
+![FreeRTOS Architecture](docs/images/freertos-architecture.png)
 
 *Figure 3. FreeRTOS tasks, priorities, and inter-task communication used in the project.*
 
@@ -101,7 +101,7 @@ All continuously executing tasks block, delay, or wait when appropriate to preve
 
 ## Hardware / Simulated Components
 
-![Wokwi Circuit](docs/images/wokwi-circuit.png.png)
+![Wokwi Circuit](docs/images/wokwi-circuit.png)
 
 *Figure 4. Complete Wokwi circuit of the STM32 multisensor room monitoring system.*
 
@@ -329,7 +329,7 @@ The mutex helps prevent serial output from multiple tasks from becoming interlea
 
 The system operates using two main states: ACTIVE and INACTIVE.
 
-![State Machine](docs/images/state-machine.png.png)
+![State Machine](docs/images/state-machine.png)
 
 *Figure 5. ACTIVE and INACTIVE state machine of the room monitoring system.*
 
