@@ -1,6 +1,7 @@
 #include "stm32f1xx_hal.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "app.h"
 
 #include <cstring>
 
@@ -12,13 +13,7 @@ extern "C" void Error_Handler(void);
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
-static void UART_Print(const char *msg);
-
-static void TaskA(void *pvParameters);
-static void TaskB(void *pvParameters);
-
-static TaskHandle_t taskA_handle = nullptr;
-static TaskHandle_t taskB_handle = nullptr;
+void UART_Print(const char *msg);
 
 int main(void)
 {
@@ -29,66 +24,17 @@ int main(void)
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
-    UART_Print("SYSTEM INITIALIZED\r\n");
+       UART_Print("SYSTEM INITIALIZED\r\n");
 
-    BaseType_t resultA = xTaskCreate(
-        TaskA,
-        "TaskA",
-        128,
-        nullptr,
-        2,
-        &taskA_handle
-    );
-
-    BaseType_t resultB = xTaskCreate(
-        TaskB,
-        "TaskB",
-        128,
-        nullptr,
-        2,
-        &taskB_handle
-    );
-
-   if (resultA != pdPASS || resultB != pdPASS)
-{
-    UART_Print("TASK CREATE FAILED\r\n");
-    while (1) {}
-}
-
-
-    UART_Print("TASKS CREATED\r\n");
-    UART_Print("BEFORE SCHEDULER\r\n");
-
-    vTaskStartScheduler();
+    app_main();
 
 }
 
-static void TaskA(void *pvParameters)
-{
-    (void)pvParameters;
-
-    for (;;)
-    {
-        UART_Print("Task A running\r\n");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
-
-static void TaskB(void *pvParameters)
-{
-    (void)pvParameters;
-
-    for (;;)
-    {
-        UART_Print("Task B running\r\n");
-        vTaskDelay(pdMS_TO_TICKS(1500));
-    }
-}
 
 /* ---- UART helper --------------------------------------------------------
  * Not yet mutex-protected — Part XI adds a mutex once a second writer
  * actually contends for this resource. */
-static void UART_Print(const char *msg)
+void UART_Print(const char *msg)
 {
     HAL_UART_Transmit(&huart1, reinterpret_cast<const uint8_t *>(msg),
                        strlen(msg), HAL_MAX_DELAY);
