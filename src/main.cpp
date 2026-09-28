@@ -2,6 +2,7 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
 
 #include "app.h"
 
@@ -16,6 +17,7 @@ UART_HandleTypeDef huart1;
 ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 
+static SemaphoreHandle_t uartMutex = nullptr;
 
 /* ============================================================
  * Forward declarations
@@ -62,11 +64,22 @@ int main(void)
     SystemClock_Config();
 
     MX_GPIO_Init();
-    MX_USART1_UART_Init();
-    MX_ADC1_Init();
-    MX_I2C1_Init();
+MX_USART1_UART_Init();
+MX_ADC1_Init();
+MX_I2C1_Init();
 
-    UART_Print("\r\n");
+/*
+ * Create UART mutex.
+ */
+uartMutex =
+    xSemaphoreCreateMutex();
+
+if (uartMutex == nullptr)
+{
+    Error_Handler();
+}
+
+UART_Print("\r\n");
     UART_Print("BCA182 FreeRTOS Multisensor\r\n");
     UART_Print("SYSTEM INITIALIZED\r\n");
 
@@ -84,12 +97,46 @@ int main(void)
 
 void UART_Print(const char *msg)
 {
-    HAL_UART_Transmit(
-        &huart1,
-        reinterpret_cast<const uint8_t *>(msg),
-        strlen(msg),
-        HAL_MAX_DELAY
-    );
+    /*
+     * Before the scheduler starts, print normally.
+     *
+     * After the scheduler starts, protect UART using
+     * the mutex so only one task prints at a time.
+     */
+
+    if (
+        uartMutex != nullptr &&
+        xTaskGetSchedulerState() == taskSCHEDULER_RUNNING
+    )
+    {
+        if (
+            xSemaphoreTake(
+                uartMutex,
+                portMAX_DELAY
+            ) == pdTRUE
+        )
+        {
+            HAL_UART_Transmit(
+                &huart1,
+                reinterpret_cast<const uint8_t *>(msg),
+                strlen(msg),
+                HAL_MAX_DELAY
+            );
+
+            xSemaphoreGive(
+                uartMutex
+            );
+        }
+    }
+    else
+    {
+        HAL_UART_Transmit(
+            &huart1,
+            reinterpret_cast<const uint8_t *>(msg),
+            strlen(msg),
+            HAL_MAX_DELAY
+        );
+    }
 }
 
 
