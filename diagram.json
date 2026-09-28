@@ -44,7 +44,14 @@
       "top": 150,
       "left": 100,
       "attrs": {}
-    }
+    },
+    {
+  "type": "wokwi-buzzer",
+  "id": "buzzer1",
+  "top": 180,
+  "left": 180,
+  "attrs": {}
+}
   ],
   "connections": [
     [
@@ -130,12 +137,12 @@
       [] 
     ],
     [ "encoder:CLK", 
-      "stm32:A2", 
+      "stm32:A4", 
       "green", 
       [] 
     ],
     [ "encoder:DT", 
-      "stm32:A3", 
+      "stm32:A5", 
       "green", 
       [] 
     ],
@@ -143,6 +150,8 @@
       "stm32:B0", 
       "green", 
       [] 
-    ]
+    ],
+    ["buzzer1:1", "bluepill1:A2", "purple", []],
+["buzzer1:2", "bluepill1:GND", "black", []]
   ]
 }
