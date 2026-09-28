@@ -3,6 +3,7 @@
 #include "alarm.h"
 #include "buzzer.h"
 #include "system_state.h"
+#include "input.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -33,19 +34,6 @@ struct SensorData
     float humidity;
     int lightLevel;
     bool motionDetected;
-};
-
-
-/* ============================================================
- * Display modes
- * ============================================================ */
-
-enum class DisplayMode
-{
-    TEMPERATURE,
-    HUMIDITY,
-    LIGHT,
-    MOTION
 };
 
 
@@ -170,22 +158,24 @@ static void InputTask(void *pvParameters)
          * Ignore encoder while system is inactive.
          */
         EventBits_t bits =
-    xEventGroupGetBits(
-        systemEvents
-    );
+            xEventGroupGetBits(
+                systemEvents
+            );
 
-if (
-    (bits & EVENT_ACTIVE) == 0
-)
-{
-    vTaskDelay(
-        pdMS_TO_TICKS(50)
-    );
+        if (
+            (bits & EVENT_ACTIVE) == 0
+        )
+        {
+            vTaskDelay(
+                pdMS_TO_TICKS(50)
+            );
 
-    continue;
-}
+            continue;
+        }
+
 
         int32_t movement;
+
 
         taskENTER_CRITICAL();
 
@@ -198,30 +188,15 @@ if (
         taskEXIT_CRITICAL();
 
 
+        /*
+         * Clockwise
+         */
         while (movement > 0)
         {
-            switch (currentMode)
-            {
-                case DisplayMode::TEMPERATURE:
-                    currentMode =
-                        DisplayMode::HUMIDITY;
-                    break;
-
-                case DisplayMode::HUMIDITY:
-                    currentMode =
-                        DisplayMode::LIGHT;
-                    break;
-
-                case DisplayMode::LIGHT:
-                    currentMode =
-                        DisplayMode::MOTION;
-                    break;
-
-                case DisplayMode::MOTION:
-                    currentMode =
-                        DisplayMode::TEMPERATURE;
-                    break;
-            }
+            currentMode =
+                nextDisplayMode(
+                    currentMode
+                );
 
             UART_Print(
                 "Encoder: CLOCKWISE\r\n"
@@ -236,30 +211,15 @@ if (
         }
 
 
+        /*
+         * Counterclockwise
+         */
         while (movement < 0)
         {
-            switch (currentMode)
-            {
-                case DisplayMode::TEMPERATURE:
-                    currentMode =
-                        DisplayMode::MOTION;
-                    break;
-
-                case DisplayMode::HUMIDITY:
-                    currentMode =
-                        DisplayMode::TEMPERATURE;
-                    break;
-
-                case DisplayMode::LIGHT:
-                    currentMode =
-                        DisplayMode::HUMIDITY;
-                    break;
-
-                case DisplayMode::MOTION:
-                    currentMode =
-                        DisplayMode::LIGHT;
-                    break;
-            }
+            currentMode =
+                previousDisplayMode(
+                    currentMode
+                );
 
             UART_Print(
                 "Encoder: COUNTERCLOCKWISE\r\n"
@@ -272,6 +232,7 @@ if (
 
             movement++;
         }
+
 
         vTaskDelay(
             pdMS_TO_TICKS(50)
