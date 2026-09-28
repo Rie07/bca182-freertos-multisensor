@@ -2,7 +2,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include <cstdio>
 #include <cstring>
 
 /* ---- Peripheral handles ------------------------------------------------ */
@@ -23,40 +22,64 @@ static TaskHandle_t taskB_handle = nullptr;
 
 int main(void)
 {
+    SCB->VTOR = FLASH_BASE;
     HAL_Init();
+
     SystemClock_Config();
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
-    UART_Print("BCA182 FreeRTOS Multisensor\r\n");
-    UART_Print("System starting...\r\n");
+    UART_Print("SYSTEM INITIALIZED\r\n");
 
-    /* Part 17: two simple tasks, both must block between executions
-     * (Part 19: no uncontrolled busy loops). */
-   BaseType_t resultA = xTaskCreate(TaskA, "TaskA", configMINIMAL_STACK_SIZE, nullptr, tskIDLE_PRIORITY + 1, &taskA_handle); UART_Print(resultA == pdPASS ? "TaskA created OK\r\n" : "TaskA create FAILED\r\n"); 
-   BaseType_t resultB = xTaskCreate(TaskB, "TaskB", configMINIMAL_STACK_SIZE, nullptr, tskIDLE_PRIORITY + 1, &taskB_handle); UART_Print(resultB == pdPASS ? "TaskB created OK\r\n" : "TaskB create FAILED\r\n");
-   UART_Print("Starting scheduler...\r\n");
-   vTaskStartScheduler();
+    BaseType_t resultA = xTaskCreate(
+        TaskA,
+        "TaskA",
+        128,
+        nullptr,
+        2,
+        &taskA_handle
+    );
 
-    /* Should never reach here — if it does, heap allocation for the
-     * idle/timer task failed. */
-    for (;;) {
-    }
+    BaseType_t resultB = xTaskCreate(
+        TaskB,
+        "TaskB",
+        128,
+        nullptr,
+        2,
+        &taskB_handle
+    );
+
+   if (resultA != pdPASS || resultB != pdPASS)
+{
+    UART_Print("TASK CREATE FAILED\r\n");
+    while (1) {}
+}
+
+
+    UART_Print("TASKS CREATED\r\n");
+    UART_Print("BEFORE SCHEDULER\r\n");
+
+    vTaskStartScheduler();
+
 }
 
 static void TaskA(void *pvParameters)
 {
     (void)pvParameters;
-    for (;;) {
+
+    for (;;)
+    {
         UART_Print("Task A running\r\n");
-        vTaskDelay(pdMS_TO_TICKS(1000)); /* Blocked here -> Running when it wakes */
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
 static void TaskB(void *pvParameters)
 {
     (void)pvParameters;
-    for (;;) {
+
+    for (;;)
+    {
         UART_Print("Task B running\r\n");
         vTaskDelay(pdMS_TO_TICKS(1500));
     }
@@ -168,5 +191,17 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskNa
     (void)pcTaskName;
     taskDISABLE_INTERRUPTS();
     for (;;) {
+    }
+}
+
+extern "C" void xPortSysTickHandler(void);
+
+extern "C" void SysTick_Handler(void)
+{
+    HAL_IncTick();
+
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+    {
+        xPortSysTickHandler();
     }
 }

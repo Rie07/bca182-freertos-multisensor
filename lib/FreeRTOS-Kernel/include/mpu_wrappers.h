@@ -1,5 +1,5 @@
 /*
- * FreeRTOS Kernel <DEVELOPMENT BRANCH>
+ * FreeRTOS Kernel V11.3.1
  * Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * SPDX-License-Identifier: MIT
@@ -286,17 +286,9 @@
 
 #else /* portUSING_MPU_WRAPPERS */
 
-    #ifndef PRIVILEGED_FUNCTION
-        #define PRIVILEGED_FUNCTION
-    #endif
-
-    #ifndef PRIVILEGED_DATA
-        #define PRIVILEGED_DATA
-    #endif
-
-    #ifndef FREERTOS_SYSTEM_CALL
-        #define FREERTOS_SYSTEM_CALL
-    #endif
+    #define PRIVILEGED_FUNCTION
+    #define PRIVILEGED_DATA
+    #define FREERTOS_SYSTEM_CALL
 
 #endif /* portUSING_MPU_WRAPPERS */
 

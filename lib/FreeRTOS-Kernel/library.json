@@ -1,0 +1,12 @@
+{
+  "name": "FreeRTOS-Kernel",
+  "version": "1.0.0",
+  "build": {
+    "srcFilter": [
+      "+<*.c>",
+      "+<portable/GCC/ARM_CM3/*.c>",
+      "+<portable/MemMang/*.c>"
+    ],
+    "includeDir": "include"
+  }
+}
