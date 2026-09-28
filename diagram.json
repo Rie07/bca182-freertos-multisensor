@@ -2,6 +2,7 @@
   "version": 1,
   "author": "Sherie Grace Lupoz",
   "editor": "wokwi",
+
   "parts": [
     {
       "type": "board-stm32-bluepill",
@@ -10,6 +11,7 @@
       "left": 0,
       "attrs": {}
     },
+
     {
       "type": "wokwi-dht22",
       "id": "dht22",
@@ -20,6 +22,7 @@
         "humidity": "75"
       }
     },
+
     {
       "type": "wokwi-photoresistor-sensor",
       "id": "ldr",
@@ -29,6 +32,7 @@
         "lux": "500"
       }
     },
+
     {
       "type": "wokwi-ssd1306",
       "id": "oled",
@@ -38,6 +42,7 @@
         "i2cAddress": "0x3C"
       }
     },
+
     {
       "type": "wokwi-ky-040",
       "id": "encoder",
@@ -45,14 +50,24 @@
       "left": 100,
       "attrs": {}
     },
+
     {
-  "type": "wokwi-buzzer",
-  "id": "buzzer1",
-  "top": 180,
-  "left": 180,
-  "attrs": {}
-}
+      "type": "wokwi-buzzer",
+      "id": "buzzer1",
+      "top": 220,
+      "left": 300,
+      "attrs": {}
+    },
+
+    {
+      "type": "wokwi-pir-motion-sensor",
+      "id": "pir1",
+      "top": 220,
+      "left": -180,
+      "attrs": {}
+    }
   ],
+
   "connections": [
     [
       "stm32:A9",
@@ -60,98 +75,152 @@
       "green",
       []
     ],
+
     [
       "stm32:A10",
       "$serialMonitor:TX",
       "green",
       []
     ],
+
     [
       "dht22:VCC",
       "stm32:3V3",
       "red",
       []
     ],
+
     [
       "dht22:GND",
       "stm32:GND.1",
       "black",
       []
     ],
+
     [
       "dht22:SDA",
       "stm32:A1",
       "green",
       []
     ],
+
     [
       "ldr:VCC",
       "stm32:3V3",
       "red",
       []
     ],
+
     [
       "ldr:GND",
       "stm32:GND.2",
       "black",
       []
     ],
+
     [
       "ldr:AO",
       "stm32:A0",
       "green",
       []
     ],
+
     [
       "oled:VCC",
       "stm32:3V3",
       "red",
       []
     ],
+
     [
       "oled:GND",
       "stm32:GND.3",
       "black",
       []
     ],
+
     [
       "oled:SCL",
       "stm32:B6",
       "green",
       []
     ],
+
     [
       "oled:SDA",
       "stm32:B7",
       "green",
       []
     ],
-    [ "encoder:VCC", 
-      "stm32:3V3", 
-      "red", 
-      [] 
+
+    [
+      "encoder:VCC",
+      "stm32:3V3",
+      "red",
+      []
     ],
-    [ "encoder:GND", 
-      "stm32:GND.4", 
-      "black", 
-      [] 
+
+    [
+      "encoder:GND",
+      "stm32:GND.4",
+      "black",
+      []
     ],
-    [ "encoder:CLK", 
-      "stm32:A4", 
-      "green", 
-      [] 
+
+    [
+      "encoder:CLK",
+      "stm32:A4",
+      "green",
+      []
     ],
-    [ "encoder:DT", 
-      "stm32:A5", 
-      "green", 
-      [] 
+
+    [
+      "encoder:DT",
+      "stm32:A5",
+      "green",
+      []
     ],
-    [ "encoder:SW", 
-      "stm32:B0", 
-      "green", 
-      [] 
+
+    [
+      "encoder:SW",
+      "stm32:B0",
+      "green",
+      []
     ],
-    ["buzzer1:1", "bluepill1:A2", "purple", []],
-["buzzer1:2", "bluepill1:GND", "black", []]
+
+    [
+      "buzzer1:1",
+      "stm32:A2",
+      "purple",
+      []
+    ],
+
+    [
+      "buzzer1:2",
+      "stm32:GND",
+      "black",
+      []
+    ],
+
+    [
+      "pir1:VCC",
+      "stm32:3V3",
+      "red",
+      []
+    ],
+
+    [
+      "pir1:GND",
+      "stm32:GND",
+      "black",
+      []
+    ],
+
+    [
+      "pir1:OUT",
+      "stm32:A3",
+      "gold",
+      []
+    ]
   ]
 }

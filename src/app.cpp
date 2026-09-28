@@ -1,25 +1,25 @@
 #include "app.h"
-
 #include "display.h"
+#include "alarm.h"
+#include "buzzer.h"
+#include "system_state.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "alarm.h"
-#include "buzzer.h"
+#include "event_groups.h"
 
 #include <cstdio>
 #include <cstdint>
 
 
 /* ============================================================
- * Functions and peripherals provided by main.cpp
+ * External functions / peripherals
  * ============================================================ */
 
 void UART_Print(const char *msg);
 
 extern ADC_HandleTypeDef hadc1;
-
 extern I2C_HandleTypeDef hi2c1;
 
 
@@ -30,11 +30,8 @@ extern I2C_HandleTypeDef hi2c1;
 struct SensorData
 {
     float temperature;
-
     float humidity;
-
     int lightLevel;
-
     bool motionDetected;
 };
 
@@ -46,36 +43,74 @@ struct SensorData
 enum class DisplayMode
 {
     TEMPERATURE,
-
     HUMIDITY,
-
     LIGHT,
-
     MOTION
 };
 
 
 /* ============================================================
- * FreeRTOS queues
+ * Queues
  * ============================================================ */
 
-/*
- * Length-1 queues are used because only the newest value
- * matters.
- */
-static QueueHandle_t sensorToDisplayQueue = nullptr;
-static QueueHandle_t sensorToAlarmQueue = nullptr;
-static QueueHandle_t displayModeQueue = nullptr;
+static QueueHandle_t sensorToDisplayQueue =
+    nullptr;
+
+static QueueHandle_t sensorToAlarmQueue =
+    nullptr;
+
+static QueueHandle_t displayModeQueue =
+    nullptr;
 
 /* ============================================================
- * Rotary encoder movement
+ * FreeRTOS Event Group
+ * ============================================================ */
+
+static EventGroupHandle_t systemEvents = nullptr;
+
+
+/*
+ * Bit 0:
+ * System is currently ACTIVE.
  *
- * The EXTI interrupt only modifies this counter.
+ * Set by StateTask.
+ * Read by InputTask, DisplayTask and AlarmTask.
+ */
+#define EVENT_ACTIVE   (1 << 0)
+
+
+/*
+ * Bit 1:
+ * Motion is currently detected.
  *
- * IMPORTANT:
- * We intentionally do NOT call FreeRTOS APIs from the encoder
- * interrupt because the Wokwi compatibility port does not
- * require an ISR context switch here.
+ * Set/cleared by MotionTask.
+ * Read by StateTask.
+ */
+#define EVENT_MOTION   (1 << 1)
+
+
+/*
+ * Bit 2:
+ * Temperature alarm is active.
+ *
+ * Set/cleared by AlarmTask.
+ * Can be read by DisplayTask later.
+ */
+#define EVENT_ALARM    (1 << 2)
+
+/* ============================================================
+ * Shared motion / system-state variables
+ * ============================================================ */
+
+static volatile bool motionDetected =
+    false;
+
+static volatile SystemState currentSystemState =
+    SystemState::ACTIVE;
+
+
+/* ============================================================
+ * Encoder movement
  * ============================================================ */
 
 static volatile int32_t encoderDelta =
@@ -83,10 +118,7 @@ static volatile int32_t encoderDelta =
 
 
 /* ============================================================
- * Rotary encoder interrupt callback
- *
- * PA4 = CLK
- * PA5 = DT
+ * Encoder EXTI callback
  * ============================================================ */
 
 extern "C" void HAL_GPIO_EXTI_Callback(
@@ -100,13 +132,6 @@ extern "C" void HAL_GPIO_EXTI_Callback(
                 GPIO_PIN_5
             );
 
-
-        /*
-         * Determine direction using DT when CLK falls.
-         *
-         * If direction appears reversed in Wokwi,
-         * simply swap ++ and -- below.
-         */
         if (dt == GPIO_PIN_SET)
         {
             encoderDelta++;
@@ -121,43 +146,47 @@ extern "C" void HAL_GPIO_EXTI_Callback(
 
 /* ============================================================
  * InputTask
- *
- * Reads movement captured by EXTI4.
- *
- * Priority = 3
  * ============================================================ */
 
 static void InputTask(void *pvParameters)
 {
     (void)pvParameters;
 
-
     DisplayMode currentMode =
         DisplayMode::TEMPERATURE;
-
 
     UART_Print(
         "InputTask started\r\n"
     );
 
-
-    /*
-     * Send initial page.
-     */
     xQueueOverwrite(
         displayModeQueue,
         &currentMode
     );
 
-
     for (;;)
     {
+        /*
+         * Ignore encoder while system is inactive.
+         */
+        EventBits_t bits =
+    xEventGroupGetBits(
+        systemEvents
+    );
+
+if (
+    (bits & EVENT_ACTIVE) == 0
+)
+{
+    vTaskDelay(
+        pdMS_TO_TICKS(50)
+    );
+
+    continue;
+}
+
         int32_t movement;
 
-
-        /*
-         * Copy and clear encoder movement atomically.
-         */
         taskENTER_CRITICAL();
 
         movement =
@@ -169,130 +198,81 @@ static void InputTask(void *pvParameters)
         taskEXIT_CRITICAL();
 
 
-        /*
-         * Process clockwise movement.
-         */
         while (movement > 0)
         {
             switch (currentMode)
             {
                 case DisplayMode::TEMPERATURE:
-
                     currentMode =
                         DisplayMode::HUMIDITY;
-
                     break;
-
 
                 case DisplayMode::HUMIDITY:
-
                     currentMode =
                         DisplayMode::LIGHT;
-
                     break;
-
 
                 case DisplayMode::LIGHT:
-
                     currentMode =
                         DisplayMode::MOTION;
-
                     break;
-
 
                 case DisplayMode::MOTION:
-
                     currentMode =
                         DisplayMode::TEMPERATURE;
-
                     break;
             }
-
 
             UART_Print(
                 "Encoder: CLOCKWISE\r\n"
             );
 
-
-            movement--;
-
-
-            /*
-             * Queue only stores the newest selected page.
-             */
             xQueueOverwrite(
                 displayModeQueue,
                 &currentMode
             );
+
+            movement--;
         }
 
 
-        /*
-         * Process counterclockwise movement.
-         */
         while (movement < 0)
         {
             switch (currentMode)
             {
                 case DisplayMode::TEMPERATURE:
-
                     currentMode =
                         DisplayMode::MOTION;
-
                     break;
-
 
                 case DisplayMode::HUMIDITY:
-
                     currentMode =
                         DisplayMode::TEMPERATURE;
-
                     break;
-
 
                 case DisplayMode::LIGHT:
-
                     currentMode =
                         DisplayMode::HUMIDITY;
-
                     break;
-
 
                 case DisplayMode::MOTION:
-
                     currentMode =
                         DisplayMode::LIGHT;
-
                     break;
             }
-
 
             UART_Print(
                 "Encoder: COUNTERCLOCKWISE\r\n"
             );
 
-
-            movement++;
-
-
             xQueueOverwrite(
                 displayModeQueue,
                 &currentMode
             );
+
+            movement++;
         }
 
-
-        /*
-         * IMPORTANT:
-         *
-         * RTOS tick = 50 ms.
-         *
-         * This delay really blocks InputTask for one tick,
-         * allowing SensorTask and DisplayTask to run.
-         *
-         * Encoder pulses are not lost because EXTI captures
-         * them while this task is blocked.
-         */
         vTaskDelay(
             pdMS_TO_TICKS(50)
         );
@@ -302,42 +282,31 @@ static void InputTask(void *pvParameters)
 
 /* ============================================================
  * DisplayTask
- *
- * Sole owner of the OLED.
- *
- * Priority = 1
  * ============================================================ */
 
 static void DisplayTask(void *pvParameters)
 {
     (void)pvParameters;
 
-
     SensorData data = {};
-
 
     DisplayMode currentMode =
         DisplayMode::TEMPERATURE;
 
-
     bool haveSensorData =
         false;
-
 
     UART_Print(
         "DisplayTask started\r\n"
     );
 
-
     Display_Init(
         &hi2c1
     );
 
-
     UART_Print(
         "OLED INITIALIZED\r\n"
     );
-
 
     for (;;)
     {
@@ -345,12 +314,30 @@ static void DisplayTask(void *pvParameters)
             false;
 
 
-        /* ====================================================
-         * Check for encoder page change
-         * ==================================================== */
+        /*
+         * If inactive, blank the display.
+         */
+        EventBits_t eventBits =
+    xEventGroupGetBits(
+        systemEvents
+    );
+
+
+if (
+    (eventBits & EVENT_ACTIVE) == 0
+)
+{
+    Display_Clear();
+
+    vTaskDelay(
+        pdMS_TO_TICKS(100)
+    );
+
+    continue;
+}
+
 
         DisplayMode newMode;
-
 
         if (
             xQueueReceive(
@@ -365,63 +352,40 @@ static void DisplayTask(void *pvParameters)
                 currentMode =
                     newMode;
 
-
                 redraw =
                     true;
-
 
                 switch (currentMode)
                 {
                     case DisplayMode::TEMPERATURE:
-
                         UART_Print(
                             "Display page: TEMPERATURE\r\n"
                         );
-
                         break;
 
-
                     case DisplayMode::HUMIDITY:
-
                         UART_Print(
                             "Display page: HUMIDITY\r\n"
                         );
-
                         break;
 
-
                     case DisplayMode::LIGHT:
-
                         UART_Print(
                             "Display page: LIGHT\r\n"
                         );
-
                         break;
 
-
                     case DisplayMode::MOTION:
-
                         UART_Print(
                             "Display page: MOTION\r\n"
                         );
-
                         break;
                 }
             }
         }
 
 
-        /* ====================================================
-         * Check for new sensor data
-         *
-         * Wait only one RTOS tick (50 ms), NOT forever.
-         *
-         * This allows the display to respond to encoder
-         * changes even when no new sensor reading arrives.
-         * ==================================================== */
-
         SensorData newData;
-
 
         if (
             xQueueReceive(
@@ -434,14 +398,11 @@ static void DisplayTask(void *pvParameters)
             data =
                 newData;
 
-
             haveSensorData =
                 true;
 
-
             redraw =
                 true;
-
 
             UART_Print(
                 "DisplayTask: DATA RECEIVED\r\n"
@@ -449,60 +410,38 @@ static void DisplayTask(void *pvParameters)
         }
 
 
-        /*
-         * We need at least one sensor measurement before
-         * showing values.
-         */
         if (!haveSensorData)
         {
             continue;
         }
 
 
-        /* ====================================================
-         * Refresh OLED when either:
-         *
-         * 1. New sensor data arrived, OR
-         * 2. Encoder selected another page.
-         * ==================================================== */
-
         if (redraw)
         {
             switch (currentMode)
             {
                 case DisplayMode::TEMPERATURE:
-
                     Display_ShowTemperature(
                         data.temperature
                     );
-
                     break;
 
-
                 case DisplayMode::HUMIDITY:
-
                     Display_ShowHumidity(
                         data.humidity
                     );
-
                     break;
 
-
                 case DisplayMode::LIGHT:
-
                     Display_ShowLight(
                         data.lightLevel
                     );
-
                     break;
 
-
                 case DisplayMode::MOTION:
-
                     Display_ShowMotion(
                         data.motionDetected
                     );
-
                     break;
             }
         }
@@ -511,29 +450,282 @@ static void DisplayTask(void *pvParameters)
 
 
 /* ============================================================
- * DHT22
- *
- * PA1
+ * MotionTask
  * ============================================================ */
 
-#define DHT22_PORT GPIOA
+static void MotionTask(void *pvParameters)
+{
+    (void)pvParameters;
 
-#define DHT22_PIN GPIO_PIN_1
+    bool previousMotion = false;
+
+    UART_Print(
+        "MotionTask started\r\n"
+    );
+
+
+    for (;;)
+    {
+        bool currentMotion =
+            (
+                HAL_GPIO_ReadPin(
+                    GPIOA,
+                    GPIO_PIN_3
+                ) == GPIO_PIN_SET
+            );
+
+
+        /*
+         * Keep existing variable working.
+         */
+        motionDetected =
+            currentMotion;
+
+
+        /*
+         * Update EVENT_MOTION.
+         */
+        if (currentMotion)
+        {
+            xEventGroupSetBits(
+                systemEvents,
+                EVENT_MOTION
+            );
+        }
+        else
+        {
+            xEventGroupClearBits(
+                systemEvents,
+                EVENT_MOTION
+            );
+        }
+
+
+        /*
+         * Print only when motion begins.
+         */
+        if (
+            currentMotion &&
+            !previousMotion
+        )
+        {
+            UART_Print(
+                "Motion detected\r\n"
+            );
+        }
+
+
+        /*
+         * Print only when motion ends.
+         */
+        if (
+            !currentMotion &&
+            previousMotion
+        )
+        {
+            UART_Print(
+                "Motion stopped\r\n"
+            );
+        }
+
+
+        previousMotion =
+            currentMotion;
+
+
+        vTaskDelay(
+            pdMS_TO_TICKS(100)
+        );
+    }
+}
 
 
 /* ============================================================
- * DWT microsecond timing
+ * StateTask
  * ============================================================ */
+
+static void StateTask(void *pvParameters)
+{
+    (void)pvParameters;
+
+
+    SystemState state =
+        SystemState::ACTIVE;
+
+
+    TickType_t lastMotionTime =
+        xTaskGetTickCount();
+
+
+    /*
+     * Initial system state.
+     */
+    currentSystemState =
+        SystemState::ACTIVE;
+
+
+    /*
+     * EVENT_ACTIVE starts SET.
+     */
+    xEventGroupSetBits(
+        systemEvents,
+        EVENT_ACTIVE
+    );
+
+
+    UART_Print(
+        "StateTask started\r\n"
+    );
+
+
+    UART_Print(
+        "System state: ACTIVE\r\n"
+    );
+
+
+    for (;;)
+    {
+        TickType_t now =
+            xTaskGetTickCount();
+
+
+        /*
+         * Read EVENT_MOTION from event group.
+         */
+        EventBits_t bits =
+            xEventGroupGetBits(
+                systemEvents
+            );
+
+
+        bool motion =
+            (
+                bits &
+                EVENT_MOTION
+            ) != 0;
+
+
+        /*
+         * Motion resets inactivity timer.
+         */
+        if (motion)
+        {
+            lastMotionTime =
+                now;
+        }
+
+
+        uint32_t elapsedMs =
+            static_cast<uint32_t>(
+                (now - lastMotionTime) *
+                portTICK_PERIOD_MS
+            );
+
+
+        SystemState newState =
+            evaluateSystemState(
+                state,
+                motion,
+                elapsedMs
+            );
+
+
+        /*
+         * Only process when state changes.
+         */
+        if (newState != state)
+        {
+            state =
+                newState;
+
+
+            currentSystemState =
+                state;
+
+
+            if (
+                state ==
+                SystemState::ACTIVE
+            )
+            {
+                /*
+                 * Signal ACTIVE state.
+                 */
+                xEventGroupSetBits(
+                    systemEvents,
+                    EVENT_ACTIVE
+                );
+
+
+                UART_Print(
+                    "System state: ACTIVE\r\n"
+                );
+            }
+            else
+            {
+                /*
+                 * Signal INACTIVE state.
+                 */
+                xEventGroupClearBits(
+                    systemEvents,
+                    EVENT_ACTIVE
+                );
+
+
+                /*
+                 * Silence buzzer immediately.
+                 */
+                Buzzer_Off();
+
+
+                /*
+                 * Clear alarm event.
+                 */
+                xEventGroupClearBits(
+                    systemEvents,
+                    EVENT_ALARM
+                );
+
+
+                /*
+                 * Turn OLED off/blank.
+                 */
+                Display_Clear();
+
+
+                UART_Print(
+                    "System state: INACTIVE\r\n"
+                );
+            }
+        }
+
+
+        currentSystemState =
+            state;
+
+
+        vTaskDelay(
+            pdMS_TO_TICKS(250)
+        );
+    }
+}
+
+
+/* ============================================================
+ * DHT22
+ * ============================================================ */
+
+#define DHT22_PORT GPIOA
+#define DHT22_PIN  GPIO_PIN_1
+
 
 static void DWT_Delay_Init(void)
 {
     CoreDebug->DEMCR |=
         CoreDebug_DEMCR_TRCENA_Msk;
 
-
     DWT->CTRL |=
         DWT_CTRL_CYCCNTENA_Msk;
-
 
     DWT->CYCCNT =
         0;
@@ -545,14 +737,12 @@ static void delay_us(uint32_t us)
     uint32_t start =
         DWT->CYCCNT;
 
-
     uint32_t cycles =
         us *
         (
             HAL_RCC_GetHCLKFreq() /
             1000000U
         );
-
 
     while (
         (DWT->CYCCNT - start) <
@@ -563,30 +753,21 @@ static void delay_us(uint32_t us)
 }
 
 
-/* ============================================================
- * DHT22 GPIO output mode
- * ============================================================ */
-
 static void DHT22_SetOutput(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {};
 
-
     GPIO_InitStruct.Pin =
         DHT22_PIN;
-
 
     GPIO_InitStruct.Mode =
         GPIO_MODE_OUTPUT_PP;
 
-
     GPIO_InitStruct.Pull =
         GPIO_NOPULL;
 
-
     GPIO_InitStruct.Speed =
         GPIO_SPEED_FREQ_HIGH;
-
 
     HAL_GPIO_Init(
         DHT22_PORT,
@@ -594,27 +775,19 @@ static void DHT22_SetOutput(void)
     );
 }
 
-
-/* ============================================================
- * DHT22 GPIO input mode
- * ============================================================ */
 
 static void DHT22_SetInput(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {};
 
-
     GPIO_InitStruct.Pin =
         DHT22_PIN;
-
 
     GPIO_InitStruct.Mode =
         GPIO_MODE_INPUT;
 
-
     GPIO_InitStruct.Pull =
         GPIO_PULLUP;
-
 
     HAL_GPIO_Init(
         DHT22_PORT,
@@ -622,20 +795,12 @@ static void DHT22_SetInput(void)
     );
 }
 
-
-/* ============================================================
- * Read one DHT22 data bit
- * ============================================================ */
 
 static uint8_t DHT22_ReadBit(void)
 {
     uint32_t timeout =
         0;
 
-
-    /*
-     * Wait for previous HIGH pulse to finish.
-     */
     while (
         HAL_GPIO_ReadPin(
             DHT22_PORT,
@@ -654,9 +819,6 @@ static uint8_t DHT22_ReadBit(void)
         0;
 
 
-    /*
-     * Wait for beginning of HIGH data pulse.
-     */
     while (
         HAL_GPIO_ReadPin(
             DHT22_PORT,
@@ -671,9 +833,6 @@ static uint8_t DHT22_ReadBit(void)
     }
 
 
-    /*
-     * Sample after 40 us.
-     */
     delay_us(40);
 
 
@@ -691,10 +850,6 @@ static uint8_t DHT22_ReadBit(void)
     return 0;
 }
 
-
-/* ============================================================
- * Read complete DHT22 packet
- * ============================================================ */
 
 static bool DHT22_Read(
     float *temperature,
@@ -720,9 +875,6 @@ static bool DHT22_Read(
     );
 
 
-    /*
-     * Start signal.
-     */
     delay_us(2000);
 
 
@@ -743,9 +895,6 @@ static bool DHT22_Read(
         0;
 
 
-    /*
-     * Wait for sensor response LOW.
-     */
     while (
         HAL_GPIO_ReadPin(
             DHT22_PORT,
@@ -764,9 +913,6 @@ static bool DHT22_Read(
         0;
 
 
-    /*
-     * Sensor response LOW.
-     */
     while (
         HAL_GPIO_ReadPin(
             DHT22_PORT,
@@ -785,9 +931,6 @@ static bool DHT22_Read(
         0;
 
 
-    /*
-     * Sensor response HIGH.
-     */
     while (
         HAL_GPIO_ReadPin(
             DHT22_PORT,
@@ -802,15 +945,11 @@ static bool DHT22_Read(
     }
 
 
-    /*
-     * Read 40 bits.
-     */
     for (int byte = 0; byte < 5; byte++)
     {
         for (int bit = 0; bit < 8; bit++)
         {
             data[byte] <<= 1;
-
 
             data[byte] |=
                 DHT22_ReadBit();
@@ -818,9 +957,6 @@ static bool DHT22_Read(
     }
 
 
-    /*
-     * Verify checksum.
-     */
     uint8_t checksum =
         static_cast<uint8_t>(
             data[0] +
@@ -861,14 +997,10 @@ static bool DHT22_Read(
         10.0f;
 
 
-    /*
-     * Temperature sign bit.
-     */
     if (rawTemperature & 0x8000)
     {
         rawTemperature &=
             0x7FFF;
-
 
         *temperature =
             -(
@@ -889,7 +1021,7 @@ static bool DHT22_Read(
 
 
 /* ============================================================
- * LDR / ADC
+ * LDR
  * ============================================================ */
 
 static uint16_t LDR_ReadRaw(void)
@@ -909,7 +1041,6 @@ static uint16_t LDR_ReadRaw(void)
         HAL_ADC_Stop(
             &hadc1
         );
-
 
         return 0;
     }
@@ -931,21 +1062,196 @@ static uint16_t LDR_ReadRaw(void)
 
 
 /* ============================================================
+ * AlarmTask
+ * ============================================================ */
+
+static void AlarmTask(void *pvParameters)
+{
+    (void)pvParameters;
+
+
+    SensorData data;
+
+
+    AlarmState previousState =
+        AlarmState::NORMAL;
+
+
+    UART_Print(
+        "AlarmTask started\r\n"
+    );
+
+
+    Buzzer_Off();
+
+
+    for (;;)
+    {
+        if (
+            xQueueReceive(
+                sensorToAlarmQueue,
+                &data,
+                portMAX_DELAY
+            ) == pdPASS
+        )
+        {
+            /*
+             * Check whether system is ACTIVE
+             * using the Event Group.
+             */
+            EventBits_t bits =
+                xEventGroupGetBits(
+                    systemEvents
+                );
+
+
+            bool systemActive =
+                (
+                    bits &
+                    EVENT_ACTIVE
+                ) != 0;
+
+
+            /*
+             * Alarm disabled while INACTIVE.
+             */
+            if (!systemActive)
+            {
+                Buzzer_Off();
+
+
+                xEventGroupClearBits(
+                    systemEvents,
+                    EVENT_ALARM
+                );
+
+
+                continue;
+            }
+
+
+            AlarmState state =
+                evaluateTemperature(
+                    data.temperature
+                );
+
+
+            /* =================================================
+             * NORMAL
+             * ================================================= */
+
+            if (
+                state ==
+                AlarmState::NORMAL
+            )
+            {
+                Buzzer_Off();
+
+
+                /*
+                 * Alarm no longer active.
+                 */
+                xEventGroupClearBits(
+                    systemEvents,
+                    EVENT_ALARM
+                );
+
+
+                if (
+                    state !=
+                    previousState
+                )
+                {
+                    UART_Print(
+                        "Alarm state: NORMAL - BUZZER OFF\r\n"
+                    );
+                }
+            }
+
+
+            /* =================================================
+             * LOW TEMPERATURE
+             * ================================================= */
+
+            else if (
+                state ==
+                AlarmState::LOW_TEMPERATURE
+            )
+            {
+                Buzzer_On();
+
+
+                /*
+                 * Signal alarm.
+                 */
+                xEventGroupSetBits(
+                    systemEvents,
+                    EVENT_ALARM
+                );
+
+
+                if (
+                    state !=
+                    previousState
+                )
+                {
+                    UART_Print(
+                        "Alarm state: LOW_TEMPERATURE - BUZZER ON\r\n"
+                    );
+                }
+            }
+
+
+            /* =================================================
+             * HIGH TEMPERATURE
+             * ================================================= */
+
+            else if (
+                state ==
+                AlarmState::HIGH_TEMPERATURE
+            )
+            {
+                Buzzer_On();
+
+
+                /*
+                 * Signal alarm.
+                 */
+                xEventGroupSetBits(
+                    systemEvents,
+                    EVENT_ALARM
+                );
+
+
+                if (
+                    state !=
+                    previousState
+                )
+                {
+                    UART_Print(
+                        "Alarm state: HIGH_TEMPERATURE - BUZZER ON\r\n"
+                    );
+                }
+            }
+
+
+            previousState =
+                state;
+        }
+    }
+}
+
+
+/* ============================================================
  * SensorTask
- *
- * Priority = 2
- *
- * Period = 2 seconds
  * ============================================================ */
 
 static void SensorTask(void *pvParameters)
 {
     (void)pvParameters;
 
-
     float temperature =
         0.0f;
-
 
     float humidity =
         0.0f;
@@ -1007,38 +1313,28 @@ static void SensorTask(void *pvParameters)
                 );
 
 
-            /*
-             * PIR comes later in the laboratory.
-             */
             data.motionDetected =
-                false;
+                motionDetected;
 
 
-            /*
-             * Queue length is 1.
-             *
-             * Replace old sensor reading with newest reading.
-             */
             xQueueOverwrite(
-    sensorToDisplayQueue,
-    &data
-);
-
-xQueueOverwrite(
-    sensorToAlarmQueue,
-    &data
-);
-
-
-            UART_Print(
-                "Sensor data sent to queue\r\n"
+                sensorToDisplayQueue,
+                &data
             );
 
 
-            /*
-             * Serial output.
-             */
-            char message[120];
+            xQueueOverwrite(
+                sensorToAlarmQueue,
+                &data
+            );
+
+
+            UART_Print(
+                "Sensor data sent to queues\r\n"
+            );
+
+
+            char message[150];
 
 
             int tempWhole =
@@ -1092,13 +1388,13 @@ xQueueOverwrite(
             snprintf(
                 message,
                 sizeof(message),
-                "Temperature: %d.%d C | Humidity: %d.%d %% | Light: %d %% (ADC: %u)\r\n",
+                "Temperature: %d.%d C | Humidity: %d.%d %% | Light: %d %% | Motion: %s\r\n",
                 tempWhole,
                 tempDecimal,
                 humidityWhole,
                 humidityDecimal,
                 data.lightLevel,
-                lightRaw
+                data.motionDetected ? "YES" : "NO"
             );
 
 
@@ -1119,9 +1415,6 @@ xQueueOverwrite(
         );
 
 
-        /*
-         * Laboratory periodic sampling.
-         */
         vTaskDelayUntil(
             &lastWakeTime,
             pdMS_TO_TICKS(2000)
@@ -1134,112 +1427,53 @@ xQueueOverwrite(
     }
 }
 
-static void AlarmTask(void *pvParameters)
-{
-    (void)pvParameters;
-
-    SensorData data;
-
-    AlarmState previousState =
-        AlarmState::NORMAL;
-
-    UART_Print(
-        "AlarmTask started\r\n"
-    );
-
-    Buzzer_Off();
-
-
-    for (;;)
-    {
-        /*
-         * Wait for a new sensor reading.
-         */
-        if (
-            xQueueReceive(
-                sensorToAlarmQueue,
-                &data,
-                portMAX_DELAY
-            ) == pdPASS
-        )
-        {
-            AlarmState state =
-                evaluateTemperature(
-                    data.temperature
-                );
-
-
-            if (state == AlarmState::NORMAL)
-            {
-                Buzzer_Off();
-
-                if (state != previousState)
-                {
-                    UART_Print(
-                        "Alarm state: NORMAL\r\n"
-                    );
-                }
-            }
-
-
-            else if (
-                state ==
-                AlarmState::LOW_TEMPERATURE
-            )
-            {
-                Buzzer_On();
-
-                if (state != previousState)
-                {
-                    UART_Print(
-                        "Alarm state: LOW_TEMPERATURE\r\n"
-                    );
-                }
-            }
-
-
-            else if (
-                state ==
-                AlarmState::HIGH_TEMPERATURE
-            )
-            {
-                Buzzer_On();
-
-                if (state != previousState)
-                {
-                    UART_Print(
-                        "Alarm state: HIGH_TEMPERATURE\r\n"
-                    );
-                }
-            }
-
-
-            previousState =
-                state;
-        }
-    }
-}
-
 
 /* ============================================================
- * FreeRTOS application
+ * app_main
  * ============================================================ */
 
 void app_main(void)
 {
-    /* ========================================================
-     * Initialize timing and buzzer
-     * ======================================================== */
-
     DWT_Delay_Init();
 
     Buzzer_Init();
 
+        /* ========================================================
+     * Create System Event Group
+     * ======================================================== */
+
+    systemEvents =
+        xEventGroupCreate();
+
+
+    if (systemEvents == nullptr)
+    {
+        UART_Print(
+            "EVENT GROUP CREATION FAILED\r\n"
+        );
+
+
+        for (;;)
+        {
+        }
+    }
+
+
+    /*
+     * System begins ACTIVE.
+     */
+    xEventGroupSetBits(
+        systemEvents,
+        EVENT_ACTIVE
+    );
+
+
+    UART_Print(
+        "SYSTEM EVENT GROUP CREATED\r\n"
+    );
 
     /* ========================================================
-     * SENSOR -> DISPLAY QUEUE
-     *
-     * Length 1 = newest sensor value only.
+     * Sensor -> Display Queue
      * ======================================================== */
 
     sensorToDisplayQueue =
@@ -1262,9 +1496,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * SENSOR -> ALARM QUEUE
-     *
-     * AlarmTask needs its own copy of SensorData.
+     * Sensor -> Alarm Queue
      * ======================================================== */
 
     sensorToAlarmQueue =
@@ -1292,11 +1524,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * DISPLAY MODE QUEUE
-     *
-     * InputTask -> DisplayTask
-     *
-     * Length 1 because only the newest selected page matters.
+     * Display Mode Queue
      * ======================================================== */
 
     displayModeQueue =
@@ -1324,9 +1552,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * SensorTask
-     *
-     * Priority 2
+     * SensorTask - Priority 2
      * ======================================================== */
 
     BaseType_t sensorResult =
@@ -1358,9 +1584,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * AlarmTask
-     *
-     * Priority 2
+     * AlarmTask - Priority 2
      * ======================================================== */
 
     BaseType_t alarmResult =
@@ -1392,9 +1616,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * DisplayTask
-     *
-     * Priority 1
+     * DisplayTask - Priority 1
      * ======================================================== */
 
     BaseType_t displayResult =
@@ -1426,9 +1648,7 @@ void app_main(void)
 
 
     /* ========================================================
-     * InputTask
-     *
-     * Priority 3
+     * InputTask - Priority 3
      * ======================================================== */
 
     BaseType_t inputResult =
@@ -1460,7 +1680,71 @@ void app_main(void)
 
 
     /* ========================================================
-     * Start FreeRTOS scheduler
+     * MotionTask - Priority 3
+     * ======================================================== */
+
+    BaseType_t motionResult =
+        xTaskCreate(
+            MotionTask,
+            "MotionTask",
+            256,
+            nullptr,
+            3,
+            nullptr
+        );
+
+
+    if (motionResult != pdPASS)
+    {
+        UART_Print(
+            "MotionTask creation FAILED\r\n"
+        );
+
+        for (;;)
+        {
+        }
+    }
+
+
+    UART_Print(
+        "MOTION TASK CREATED\r\n"
+    );
+
+
+    /* ========================================================
+     * StateTask - Priority 3
+     * ======================================================== */
+
+    BaseType_t stateResult =
+        xTaskCreate(
+            StateTask,
+            "StateTask",
+            256,
+            nullptr,
+            3,
+            nullptr
+        );
+
+
+    if (stateResult != pdPASS)
+    {
+        UART_Print(
+            "StateTask creation FAILED\r\n"
+        );
+
+        for (;;)
+        {
+        }
+    }
+
+
+    UART_Print(
+        "STATE TASK CREATED\r\n"
+    );
+
+
+    /* ========================================================
+     * Start scheduler
      * ======================================================== */
 
     UART_Print(
@@ -1471,9 +1755,6 @@ void app_main(void)
     vTaskStartScheduler();
 
 
-    /*
-     * Should never reach here.
-     */
     UART_Print(
         "ERROR: SCHEDULER RETURNED\r\n"
     );
