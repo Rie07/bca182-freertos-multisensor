@@ -1,1 +1,148 @@
- { "version": 1, "author": "Sherie Grace Lupoz", "editor": "wokwi", "parts": [ { "type": "board-stm32-bluepill", "id": "stm32", "top": 0, "left": 0, "attrs": {} } ], "connections": [ [ "stm32:A9", "$serialMonitor:RX", "green", [] ], [ "stm32:A10", "$serialMonitor:TX", "green", [] ] ] } 
+{
+  "version": 1,
+  "author": "Sherie Grace Lupoz",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-stm32-bluepill",
+      "id": "stm32",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht22",
+      "top": -80,
+      "left": 250,
+      "attrs": {
+        "temperature": "32",
+        "humidity": "75"
+      }
+    },
+    {
+      "type": "wokwi-photoresistor-sensor",
+      "id": "ldr",
+      "top": 100,
+      "left": 250,
+      "attrs": {
+        "lux": "500"
+      }
+    },
+    {
+      "type": "wokwi-ssd1306",
+      "id": "oled",
+      "top": -80,
+      "left": 500,
+      "attrs": {
+        "i2cAddress": "0x3C"
+      }
+    },
+    {
+      "type": "wokwi-ky-040",
+      "id": "encoder",
+      "top": 150,
+      "left": 100,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "stm32:A9",
+      "$serialMonitor:RX",
+      "green",
+      []
+    ],
+    [
+      "stm32:A10",
+      "$serialMonitor:TX",
+      "green",
+      []
+    ],
+    [
+      "dht22:VCC",
+      "stm32:3V3",
+      "red",
+      []
+    ],
+    [
+      "dht22:GND",
+      "stm32:GND.1",
+      "black",
+      []
+    ],
+    [
+      "dht22:SDA",
+      "stm32:A1",
+      "green",
+      []
+    ],
+    [
+      "ldr:VCC",
+      "stm32:3V3",
+      "red",
+      []
+    ],
+    [
+      "ldr:GND",
+      "stm32:GND.2",
+      "black",
+      []
+    ],
+    [
+      "ldr:AO",
+      "stm32:A0",
+      "green",
+      []
+    ],
+    [
+      "oled:VCC",
+      "stm32:3V3",
+      "red",
+      []
+    ],
+    [
+      "oled:GND",
+      "stm32:GND.3",
+      "black",
+      []
+    ],
+    [
+      "oled:SCL",
+      "stm32:B6",
+      "green",
+      []
+    ],
+    [
+      "oled:SDA",
+      "stm32:B7",
+      "green",
+      []
+    ],
+    [ "encoder:VCC", 
+      "stm32:3V3", 
+      "red", 
+      [] 
+    ],
+    [ "encoder:GND", 
+      "stm32:GND.4", 
+      "black", 
+      [] 
+    ],
+    [ "encoder:CLK", 
+      "stm32:A2", 
+      "green", 
+      [] 
+    ],
+    [ "encoder:DT", 
+      "stm32:A3", 
+      "green", 
+      [] 
+    ],
+    [ "encoder:SW", 
+      "stm32:B0", 
+      "green", 
+      [] 
+    ]
+  ]
+}
